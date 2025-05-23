@@ -147,7 +147,7 @@ class MainAppWindow(QMainWindow):
 
         # Aba de Processos
         print(f"MainAppWindow: Instanciando ProcessesTab_pyside com user_id: {user_id_for_tabs}")
-        self.processes_tab = ProcessesTab_pyside(user_id_for_tabs, self.process_api_service, self.client_api_service, self.tab_widget)
+        self.processes_tab = ProcessesTab_pyside(user_id_for_tabs, self.process_api_service, self.client_api_service, self.hearings_api_service, self.tab_widget)
         self.tab_widget.addTab(self.processes_tab, "Processos")
         
         # Aba de Audiências (Nova)

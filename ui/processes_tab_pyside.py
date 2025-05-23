@@ -1,28 +1,30 @@
 # processes_tab_pyside.py
 
-import datetime 
+import datetime
 from typing import Dict, List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QScrollArea, QTextBrowser, QApplication, QDialog, QSplitter # QSplitter e QTextBrowser confirmados
+    QScrollArea, QTextBrowser, QApplication, QDialog, QSplitter
 )
-from PySide6.QtCore import Qt, Slot, QUrl 
-from PySide6.QtGui import QFont, QDesktopServices 
-import json 
+from PySide6.QtCore import Qt, Slot, QDateTime 
+from PySide6.QtGui import QFont
+import json
 
-from .process_form_dialog_pyside import ProcessFormDialog_pyside 
+from .process_form_dialog_pyside import ProcessFormDialog_pyside
+from .hearing_form_dialog_pyside import HearingFormDialog_pyside # Para agendar audiência
 
 class ProcessesTab_pyside(QWidget):
-    def __init__(self, user_id: str, process_api_service, client_api_service, parent=None):
+    def __init__(self, user_id: str, process_api_service, client_api_service, hearings_api_service, parent=None): 
         super().__init__(parent)
         self.user_id = user_id
         self.process_api_service = process_api_service 
         self.client_api_service = client_api_service 
+        self.hearings_api_service = hearings_api_service 
         self.selected_process_id: Optional[str] = None
         self.clients_cache: List[Dict[str, str]] = [] 
         
-        print(f"ProcessesTab_pyside: Instanciada com user_id: {self.user_id}, process_api_service: {type(self.process_api_service)}, client_api_service: {type(self.client_api_service)}")
+        print(f"ProcessesTab_pyside: Instanciada com user_id: {self.user_id}")
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -38,7 +40,7 @@ class ProcessesTab_pyside(QWidget):
         action_bar_layout.addWidget(add_process_btn)
         main_layout.addLayout(action_bar_layout)
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal) 
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.processes_table = QTableWidget()
         self.processes_table.setColumnCount(5) 
@@ -69,14 +71,17 @@ class ProcessesTab_pyside(QWidget):
         self.delete_process_btn.clicked.connect(self.delete_selected_process)
         self.delete_process_btn.setEnabled(False)
         details_content_layout.addWidget(self.delete_process_btn)
+
+        self.schedule_hearing_btn = QPushButton("Agendar Audiência para este Processo")
+        self.schedule_hearing_btn.clicked.connect(self.open_schedule_hearing_for_process_dialog)
+        self.schedule_hearing_btn.setEnabled(False) 
+        details_content_layout.addWidget(self.schedule_hearing_btn)
         
         self.details_display_browser = QTextBrowser() 
         self.details_display_browser.setOpenExternalLinks(True) 
         self.details_display_browser.setFont(QFont("Arial", 10)) 
         details_content_layout.addWidget(self.details_display_browser)
         
-        details_content_layout.addStretch() 
-
         self.process_details_content_widget.setLayout(details_content_layout) 
         self.process_details_area.setWidget(self.process_details_content_widget)
         self.splitter.addWidget(self.process_details_area)
@@ -159,6 +164,7 @@ class ProcessesTab_pyside(QWidget):
         self.clear_process_details_display()
         self.edit_process_btn.setEnabled(False)
         self.delete_process_btn.setEnabled(False)
+        self.schedule_hearing_btn.setEnabled(False)
 
     @Slot()
     def filter_processes_display(self):
@@ -177,39 +183,46 @@ class ProcessesTab_pyside(QWidget):
                 self.display_process_details(self.selected_process_id)
                 self.edit_process_btn.setEnabled(True)
                 self.delete_process_btn.setEnabled(True)
+                self.schedule_hearing_btn.setEnabled(True) 
                 return
         
         self.selected_process_id = None
         self.clear_process_details_display()
         self.edit_process_btn.setEnabled(False)
         self.delete_process_btn.setEnabled(False)
+        self.schedule_hearing_btn.setEnabled(False) 
 
     def display_process_details(self, process_id_to_display: str):
         self.clear_process_details_display() 
         print(f"DEBUG UI: Chamando display_process_details para ID: {process_id_to_display}")
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        api_response = None
+        process_api_response = None
+        hearings_api_response = None # Para armazenar a resposta das audiências
         try:
-            api_response = self.process_api_service.get_process_details(self.user_id, process_id_to_display)
+            process_api_response = self.process_api_service.get_process_details(self.user_id, process_id_to_display)
+            # Se os detalhes do processo foram carregados com sucesso, busca as audiências
+            if process_api_response and process_api_response.get("success"):
+                print(f"DEBUG UI: Buscando audiências para o processo ID: {process_id_to_display}")
+                hearings_api_response = self.hearings_api_service.get_hearings_by_user(self.user_id, process_id=process_id_to_display)
+                print(f"DEBUG UI - display_process_details - hearings_api_response: {json.dumps(hearings_api_response, indent=2, ensure_ascii=False)}")
         except Exception as e:
-            print(f"DEBUG UI - Erro ao chamar get_process_details: {e}")
-            QMessageBox.critical(self, "Erro de API", f"Erro ao buscar detalhes do processo: {e}")
-            self.details_display_browser.setHtml("<font color='red'>Erro ao buscar detalhes.</font>")
+            print(f"DEBUG UI - Erro ao chamar APIs em display_process_details: {e}")
+            QMessageBox.critical(self, "Erro de API", f"Erro ao buscar dados: {e}")
+            self.details_display_browser.setHtml("<font color='red'>Erro ao buscar dados.</font>")
             QApplication.restoreOverrideCursor()
             return
         finally:
             QApplication.restoreOverrideCursor()
 
-        if api_response and api_response.get("success") and "process" in api_response:
-            process_info = api_response.get("process", {})
-
-            html_parts = ["<h3>Detalhes do Processo:</h3><table width='100%' cellspacing='0' cellpadding='3' style='border-collapse: collapse;'>"]
+        html_parts = []
+        if process_api_response and process_api_response.get("success") and "process" in process_api_response:
+            process_info = process_api_response.get("process", {})
+            html_parts.append("<h3>Detalhes do Processo:</h3><table width='100%' cellspacing='0' cellpadding='3' style='border-collapse: collapse;'>")
             
             try:
                 dialog_fields_map = {item[1]: item[0].replace(":", "") for item in ProcessFormDialog_pyside.STATIC_PROCESS_FIELDS_CONFIG}
             except AttributeError: 
-                print("DEBUG UI: STATIC_PROCESS_FIELDS_CONFIG não encontrado. Usando mapeamento manual para detalhes.")
                 dialog_fields_map = {
                     "numero_processo": "Número do Processo", "client_cpf": "Cliente Associado",
                     "vara": "Vara", "juizo": "Juízo", "comarca": "Comarca", 
@@ -241,36 +254,64 @@ class ProcessesTab_pyside(QWidget):
                          except ValueError:
                             try:
                                 datetime.datetime.strptime(display_value_str, "%d/%m/%Y")
-                            except ValueError:
-                                pass 
-
+                            except ValueError: pass 
                     html_parts.append(f"<tr><td valign='top' style='padding: 4px; border: 1px solid #ddd;' width='180px'><b>{friendly_label_text}:</b></td><td style='padding: 4px; border: 1px solid #ddd;'>{display_value_str}</td></tr>")
-            
             html_parts.append("</table>")
 
             documents = process_info.get("documents", []) 
-
             if isinstance(documents, list) and documents:
-                html_parts.append("<br><h3>Documentos Anexados:</h3><ul style='list-style-type: none; padding-left: 0;'>")
-                for i, doc in enumerate(documents):
+                html_parts.append("<br><h3>Documentos Anexados (Processo):</h3><ul style='list-style-type: none; padding-left: 0;'>")
+                for doc in documents:
                     filename = doc.get('filename', 'Documento sem nome')
                     download_url = doc.get('download_url') 
-                    
                     if download_url:
                         html_parts.append(f"<li style='margin-bottom: 5px;'><a href='{download_url}' style='text-decoration: none; color: #007bff;'>📄 {filename}</a></li>")
                     else:
-                        html_parts.append(f"<li style='margin-bottom: 5px;'>📄 {filename} (URL de download indisponível)</li>")
+                        html_parts.append(f"<li style='margin-bottom: 5px;'>📄 {filename} (URL indisponível)</li>")
                 html_parts.append("</ul>")
             else:
-                html_parts.append("<p>Nenhum documento anexado.</p>")
-            
-            final_details_html = "".join(html_parts)
-            self.details_display_browser.setHtml(final_details_html)
+                html_parts.append("<p>Nenhum documento anexado a este processo.</p>")
         else:
             error_msg = "Falha ao buscar detalhes do processo."
-            if api_response and isinstance(api_response, dict): 
-                 error_msg = api_response.get("message", error_msg)
-            self.details_display_browser.setHtml(f"<font color='red'>{error_msg}</font>")
+            if process_api_response and isinstance(process_api_response, dict): 
+                 error_msg = process_api_response.get("message", error_msg)
+            html_parts.append(f"<p><font color='red'>{error_msg}</font></p>")
+
+        # Exibir audiências associadas
+        html_parts.append("<br><h3>Audiências Agendadas para este Processo:</h3>")
+        if hearings_api_response and hearings_api_response.get("success"):
+            process_hearings = hearings_api_response.get("hearings", [])
+            if process_hearings:
+                html_parts.append("<ul style='list-style-type: none; padding-left: 0;'>")
+                process_hearings.sort(key=lambda h: h.get("data_hora", ""), reverse=False) 
+                for hearing in process_hearings:
+                    data_hora_str = hearing.get("data_hora", "N/A")
+                    display_dt = data_hora_str
+                    try:
+                        # Tenta parsear como ISODate (que a Lambda deve retornar)
+                        dt = QDateTime.fromString(data_hora_str, Qt.DateFormat.ISODate)
+                        if not dt.isValid(): # Tenta com milissegundos se o primeiro falhar
+                             dt = QDateTime.fromString(data_hora_str, Qt.DateFormat.ISODateWithMs)
+                        
+                        if dt.isValid(): display_dt = dt.toString("dd/MM/yyyy 'às' HH:mm")
+                    except Exception as e_dt_parse:
+                        print(f"DEBUG UI: Erro ao parsear data_hora da audiência '{data_hora_str}': {e_dt_parse}")
+                        pass # Mantém a string original se o parse falhar
+                    
+                    tipo = hearing.get('tipo', 'N/A')
+                    local = hearing.get('local', 'N/A')
+                    html_parts.append(f"<li style='margin-bottom: 5px;'>📅 <strong>{tipo}</strong> em {display_dt} - Local: {local}</li>")
+                html_parts.append("</ul>")
+            else:
+                html_parts.append("<p>Nenhuma audiência agendada para este processo.</p>")
+        elif hearings_api_response: 
+            error_msg_hearings = hearings_api_response.get("message", "Não foi possível carregar audiências.")
+            html_parts.append(f"<p><font color='red'>Erro ao carregar audiências: {error_msg_hearings}</font></p>")
+        else: 
+             html_parts.append("<p><font color='red'>Não foi possível carregar informações de audiências.</font></p>")
+            
+        final_details_html = "".join(html_parts)
+        self.details_display_browser.setHtml(final_details_html)
 
     def clear_process_details_display(self):
         self.details_display_browser.setHtml("Selecione um processo para ver os detalhes.")
@@ -298,7 +339,29 @@ class ProcessesTab_pyside(QWidget):
         dialog = ProcessFormDialog_pyside(self.process_api_service, self.client_api_service, self.user_id, self.clients_cache, process_id_to_edit=self.selected_process_id, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_processes_from_api() 
-            self.display_process_details(self.selected_process_id) 
+            self.display_process_details(self.selected_process_id) # Reexibe os detalhes atualizados
+
+    @Slot()
+    def open_schedule_hearing_for_process_dialog(self):
+        if not self.selected_process_id:
+            QMessageBox.warning(self, "Seleção Necessária", "Nenhum processo selecionado para agendar audiência.")
+            return
+        
+        print(f"ProcessesTab: Abrindo diálogo de audiência para o processo ID: {self.selected_process_id}")
+        dialog = HearingFormDialog_pyside(
+            self.hearings_api_service, 
+            self.process_api_service, # Passado para que HearingFormDialog possa buscar lista de processos se necessário
+            self.user_id,
+            initial_process_id=self.selected_process_id, 
+            parent=self
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Após agendar uma audiência, atualiza os detalhes do processo para mostrar a nova audiência
+            self.display_process_details(self.selected_process_id)
+            # Opcional: Notificar a aba de audiências para recarregar também
+            # if hasattr(self.parent(), 'hearings_tab') and self.parent().hearings_tab:
+            #     self.parent().hearings_tab.load_all_hearings_from_api()
+
 
     def delete_selected_process(self):
         if not self.selected_process_id:
@@ -315,7 +378,7 @@ class ProcessesTab_pyside(QWidget):
         
         confirm_msg = (f"Tem certeza que deseja remover o processo:\n"
                        f"Nº: {numero_processo_confirm} (ID: {self.selected_process_id})\n\n"
-                       "Esta ação não pode ser desfeita e removerá também documentos associados.")
+                       "Esta ação não pode ser desfeita e removerá também documentos e audiências associadas.") 
         
         reply = QMessageBox.question(self, "Confirmar Remoção", confirm_msg,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -325,6 +388,7 @@ class ProcessesTab_pyside(QWidget):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             api_response = None
             try:
+                # A API de delete_process na Lambda deve ser ajustada para também deletar audiências associadas
                 api_response = self.process_api_service.delete_process(self.user_id, self.selected_process_id)
             except Exception as e:
                 print(f"Erro ao chamar delete_process: {e}")
@@ -338,6 +402,8 @@ class ProcessesTab_pyside(QWidget):
                 self.clear_process_details_display() 
                 self.edit_process_btn.setEnabled(False) 
                 self.delete_process_btn.setEnabled(False)
+                self.schedule_hearing_btn.setEnabled(False)
             elif api_response: 
                 error_msg = api_response.get("message", "Não foi possível remover o processo via API.")
                 QMessageBox.critical(self, "Erro na Remoção", error_msg)
+
