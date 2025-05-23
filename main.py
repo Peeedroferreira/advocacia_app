@@ -9,10 +9,10 @@ from services.auth_service import AuthService
 from services.update_service import UpdateService 
 from config.constants import CURRENT_APPLICATION_VERSION 
 from services.client_api_service import ClientApiService
-# Importar o novo ProcessApiService
 from services.process_api_service import ProcessApiService 
+from services.hearings_api_service import HearingsApiService # Nova importação
 # A linha abaixo foi mantida conforme o seu código, mas atenção ao seu uso.
-from services.dynamodb_client_handler import DynamoDBClientHandler 
+# from services.dynamodb_client_handler import DynamoDBClientHandler 
 
 class AppController(QApplication):
     def __init__(self, argv):
@@ -25,21 +25,16 @@ class AppController(QApplication):
         # --- Serviços ---
         self.auth_service = AuthService()
         
-        # ATENÇÃO: A instância abaixo (DynamoDBClientHandler) permitirá que a aplicação
-        # tente aceder ao DynamoDB diretamente. Se usada pelas abas da UI para operações de dados
-        # que deveriam ir para a API (ex: adicionar cliente), causará o erro "Unable to locate credentials"
-        # localmente, a menos que credenciais AWS estejam configuradas no ambiente local.
-        # O fluxo ideal é que todas as operações de dados passem pelos serviços de API.
-        self.dynamodb_client_handler = DynamoDBClientHandler() 
+        # self.dynamodb_client_handler = DynamoDBClientHandler() # Comentado, pois o ideal é via API
         
-        self.client_api_service = None # Será instanciado após o login bem-sucedido com um token
-        self.process_api_service = None # Adicionado: Será instanciado após o login
+        self.client_api_service = None 
+        self.process_api_service = None 
+        self.hearings_api_service = None # Novo serviço de audiências
         self.update_service = None 
 
         self.setApplicationName("Sistema Advocacia")
         self.setApplicationVersion(CURRENT_APPLICATION_VERSION)
 
-        # Lógica do ícone (mantida como no seu código)
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
         if not os.path.exists(icon_path) and hasattr(sys, '_MEIPASS'):
             icon_path = os.path.join(sys._MEIPASS, "assets", "icon.ico")
@@ -80,10 +75,8 @@ class AppController(QApplication):
         if not token_found or not self.auth_token:
             self.auth_token = None 
             print("AppController: ERRO CRÍTICO - Token de autenticação não encontrado na resposta do login.")
-            print(f"AppController: Estrutura de user_data recebida: {self.user_data}")
             QMessageBox.critical(None, "Erro de Login", 
                                  "Token de autenticação não foi retornado pelo servidor após o login.\n"
-                                 "A função Lambda de login precisa incluir um 'token' na resposta.\n"
                                  "A aplicação não pode prosseguir sem autenticação para a API.")
             return 
 
@@ -99,8 +92,10 @@ class AppController(QApplication):
         # Instanciar os serviços de API com o token
         self.client_api_service = ClientApiService(auth_token=self.auth_token)
         print("AppController: ClientApiService instanciado.")
-        self.process_api_service = ProcessApiService(auth_token=self.auth_token) # Instanciar ProcessApiService
+        self.process_api_service = ProcessApiService(auth_token=self.auth_token)
         print("AppController: ProcessApiService instanciado.")
+        self.hearings_api_service = HearingsApiService(auth_token=self.auth_token) # Instancia o novo serviço
+        print("AppController: HearingsApiService instanciado.")
         
         if self.login_window:
             self.login_window.close()
@@ -120,8 +115,15 @@ class AppController(QApplication):
 
     def show_main_app_window(self):
         # Verifica se os serviços de API foram instanciados
-        if not self.user_data or not self.client_api_service or not self.process_api_service: 
+        if not self.user_data or not self.client_api_service or not self.process_api_service or not self.hearings_api_service: 
             print("AppController: Não é possível mostrar a janela principal. Dados do usuário ou serviços de API não estão prontos.")
+            # Poderia mostrar uma mensagem de erro para o usuário aqui também ou tentar relogar.
+            # Por agora, apenas não abre a janela principal se algo essencial faltar.
+            if not self.login_window or not self.login_window.isVisible(): # Evita abrir login sobre login
+                QMessageBox.critical(None, "Erro Crítico de Inicialização", 
+                                     "Falha ao inicializar componentes essenciais da aplicação após o login.\n"
+                                     "Por favor, tente reiniciar a aplicação ou contate o suporte.")
+                self.logout() # Faz logout para tentar um novo ciclo de login
             return
         
         self.main_app_window = MainAppWindow(self.user_data, self) 
@@ -132,7 +134,8 @@ class AppController(QApplication):
         self.user_data = None
         self.auth_token = None
         self.client_api_service = None 
-        self.process_api_service = None # Limpar ProcessApiService
+        self.process_api_service = None 
+        self.hearings_api_service = None # Limpar HearingsApiService
         print("AppController: Usuário deslogado.")
         if self.main_app_window:
             self.main_app_window.close() 
@@ -140,10 +143,13 @@ class AppController(QApplication):
         self.show_login_window()
 
 if __name__ == "__main__":
+    # Garante que o diretório do projeto esteja no sys.path
+    # Isso é útil se você executar main.py diretamente de dentro de advocacia_app/
     project_dir = os.path.dirname(os.path.abspath(__file__))
     if project_dir not in sys.path:
         sys.path.insert(0, project_dir)
     
+    # Garante que a pasta 'assets' exista
     assets_dir = os.path.join(project_dir, "assets") 
     os.makedirs(assets_dir, exist_ok=True)
     

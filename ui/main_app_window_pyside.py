@@ -7,18 +7,18 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction, QIcon, QFont
 from PySide6.QtCore import Qt, Slot, QTimer
 
-from services.update_service import UpdateService # Mantido
-from config.constants import CURRENT_APPLICATION_VERSION # Mantido
+from services.update_service import UpdateService 
+from config.constants import CURRENT_APPLICATION_VERSION 
 
 # Importação das abas reais
 from .clients_tab_pyside import ClientsTab_pyside 
-from .processes_tab_pyside import ProcessesTab_pyside # Nova importação
+from .processes_tab_pyside import ProcessesTab_pyside 
+from .hearings_tab_pyside import HearingsTab_pyside # Nova importação
 
-# Placeholders para outras abas (se você ainda as tiver como placeholders)
+# Placeholder para outras abas (se você ainda as tiver como placeholders)
 class PlaceholderTab(QWidget):
-    def __init__(self, tab_name="Placeholder", api_service_param=None, parent=None): # Nome do param alterado
+    def __init__(self, tab_name="Placeholder", api_service_param=None, parent=None): 
         super().__init__(parent)
-        # self.api_service = api_service_param # Se o placeholder precisar do serviço
         layout = QVBoxLayout(self)
         label = QLabel(f"Conteúdo da Aba {tab_name} (PySide6 - A Implementar)")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -27,16 +27,15 @@ class PlaceholderTab(QWidget):
         self.setLayout(layout)
 
 class MainAppWindow(QMainWindow):
-    def __init__(self, user_data, app_controller): # app_controller é passado
+    def __init__(self, user_data, app_controller): 
         super().__init__()
         self.user_data = user_data
-        self.app_controller = app_controller # Armazena a instância do AppController
+        self.app_controller = app_controller 
         
-        # Aceder aos serviços de API através do app_controller
         self.client_api_service = self.app_controller.client_api_service 
-        self.process_api_service = self.app_controller.process_api_service # Adicionado
+        self.process_api_service = self.app_controller.process_api_service 
+        self.hearings_api_service = self.app_controller.hearings_api_service # Novo serviço
 
-        # Lógica do UpdateService
         if hasattr(self.app_controller, 'update_service') and self.app_controller.update_service is not None:
             self.update_service = self.app_controller.update_service
             self.update_service.parent_window = self 
@@ -89,12 +88,12 @@ class MainAppWindow(QMainWindow):
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(10,0,10,0)
 
-        username_display = self.user_data.get('username')
-        if not username_display and isinstance(self.user_data.get('user_data'), dict): 
-            username_display = self.user_data['user_data'].get('username', "Usuário")
-        elif not username_display:
-            username_display = "Usuário"
-
+        username_display = "Usuário" # Default
+        if isinstance(self.user_data, dict):
+            # Tenta pegar de 'username' diretamente, depois de 'user_data.username'
+            username_display = self.user_data.get('username', 
+                                 self.user_data.get('user_data', {}).get('username', "Usuário"))
+        
         welcome_label = QLabel(f"Bem-vindo(a), {username_display}!")
         welcome_label.setFont(QFont("Arial", 12)) 
         header_layout.addWidget(welcome_label)
@@ -121,19 +120,24 @@ class MainAppWindow(QMainWindow):
             QTabBar::tab:!selected:hover { background: #D0D0D0; }
         """)
 
-        user_id_for_tabs = username_display 
-        if user_id_for_tabs == "Usuário" or not user_id_for_tabs : 
+        user_id_for_tabs = username_display # Usar o nome de usuário como ID para as abas
+                                          # Idealmente, seria um user_id único do backend.
+                                          # Se 'username' não for único, isso pode causar problemas.
+                                          # Para este exemplo, vamos assumir que é o 'username' do login.
+        
+        if user_id_for_tabs == "Usuário" or not user_id_for_tabs: 
             QMessageBox.critical(self, "Erro Crítico de Usuário", "ID do usuário não pôde ser determinado para carregar as abas.")
             return
 
         # Verificar se os serviços de API estão definidos
         if not self.client_api_service:
             QMessageBox.critical(self, "Erro Crítico de API", "Serviço de API de Cliente não inicializado.")
-            print("MainAppWindow: ERRO - client_api_service é None em init_ui.")
             return
-        if not self.process_api_service: # Adicionada verificação para process_api_service
+        if not self.process_api_service:
             QMessageBox.critical(self, "Erro Crítico de API", "Serviço de API de Processos não inicializado.")
-            print("MainAppWindow: ERRO - process_api_service é None em init_ui.")
+            return
+        if not self.hearings_api_service: # Verifica o novo serviço
+            QMessageBox.critical(self, "Erro Crítico de API", "Serviço de API de Audiências não inicializado.")
             return
             
         # Aba de Clientes
@@ -141,16 +145,19 @@ class MainAppWindow(QMainWindow):
         self.clients_tab = ClientsTab_pyside(user_id_for_tabs, self.client_api_service, self.tab_widget)
         self.tab_widget.addTab(self.clients_tab, "Clientes")
 
-        # Aba de Processos (Nova)
+        # Aba de Processos
         print(f"MainAppWindow: Instanciando ProcessesTab_pyside com user_id: {user_id_for_tabs}")
         self.processes_tab = ProcessesTab_pyside(user_id_for_tabs, self.process_api_service, self.client_api_service, self.tab_widget)
         self.tab_widget.addTab(self.processes_tab, "Processos")
         
-        # Adicionar outras abas (Demandas, Audiências) como placeholders ou implementações reais
-        # self.demands_tab = PlaceholderTab("Demandas", api_service_param=None, parent=self.tab_widget) # Ajustar se precisar de API
+        # Aba de Audiências (Nova)
+        print(f"MainAppWindow: Instanciando HearingsTab_pyside com user_id: {user_id_for_tabs}")
+        self.hearings_tab = HearingsTab_pyside(user_id_for_tabs, self.hearings_api_service, self.process_api_service, self.tab_widget)
+        self.tab_widget.addTab(self.hearings_tab, "Audiências")
+        
+        # Aba de Demandas (Placeholder)
+        # self.demands_tab = PlaceholderTab("Demandas", parent=self.tab_widget) 
         # self.tab_widget.addTab(self.demands_tab, "Demandas")
-        # self.hearings_tab = PlaceholderTab("Audiências", api_service_param=None, parent=self.tab_widget) # Ajustar se precisar de API
-        # self.tab_widget.addTab(self.hearings_tab, "Audiências")
         
         main_layout.addWidget(self.tab_widget)
         print("MainAppWindow: init_ui concluído com sucesso.")
@@ -167,7 +174,7 @@ class MainAppWindow(QMainWindow):
         QMessageBox.about(self, "Sobre o Sistema de Advocacia",
                           f"Sistema de Gerenciamento para Escritórios de Advocacia\n"
                           f"Versão: {CURRENT_APPLICATION_VERSION}\n\n"
-                          "Desenvolvido por [Seu Nome/Empresa]")
+                          "Desenvolvido por [Seu Nome/Empresa]") # Substitua pelo seu nome/empresa
 
     def handle_logout(self): 
         reply = QMessageBox.question(self, "Logout",
@@ -179,20 +186,30 @@ class MainAppWindow(QMainWindow):
                 self.app_controller.logout() 
             else: 
                 print("MainAppWindow: Erro - app_controller não definido para logout.")
-                self.close()
+                self.close() # Fecha a janela se não houver controller para logout
 
     def center_window(self):
-        primary_screen = QApplication.primaryScreen()
-        if primary_screen:
-            screen_geo = primary_screen.availableGeometry()
-            center_point = screen_geo.center()
-            self.move(center_point.x() - self.width() / 2, center_point.y() - self.height() / 2)
+        try:
+            primary_screen = QApplication.primaryScreen()
+            if primary_screen:
+                screen_geo = primary_screen.availableGeometry()
+                center_point = screen_geo.center()
+                self.move(center_point.x() - self.width() / 2, center_point.y() - self.height() / 2)
+        except Exception as e:
+            print(f"Erro ao centralizar janela: {e}")
+
 
     def close_application_triggered(self):
-        self.close() 
+        self.close() # Dispara o closeEvent
 
     def closeEvent(self, event):
         print("MainAppWindow: closeEvent chamado.")
+        # Se o AppController for responsável por fechar a aplicação,
+        # você pode querer notificar o controller ou deixar que ele gerencie o quit.
+        # A lógica atual de QApplication.quit() no AppController.logout() ou LoginWindow.closeEvent
+        # deve ser suficiente se o fluxo de fechamento passar por lá.
+        # Se esta janela for fechada diretamente (ex: pelo 'X'), o QApplication.instance().quit()
+        # garante que a aplicação termine.
         app_instance = QApplication.instance()
         if app_instance:
             print("MainAppWindow: Encerrando a aplicação via QApplication.quit().")
